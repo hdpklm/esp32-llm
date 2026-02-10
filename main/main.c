@@ -11,7 +11,7 @@
 #include <string.h>
 #include "esp_system.h"
 #include "esp_heap_caps.h"
-#include "esp_clk.h"
+#include "esp_rom_sys.h"
 
 
 #ifdef DISPLAY_OLED
@@ -373,11 +373,11 @@ void uart_llm_task_2(void *arg) {
                             "\r\n--- System Info ---\r\n"
                             "Free Internal RAM: %zu bytes\r\n"
                             "Free PSRAM       : %zu bytes\r\n"
-                            "CPU Freq         : %u MHz\r\n"
+                            "CPU Freq         : %lu MHz\r\n"
                             "IDF Version      : %s\r\n"
                             "-------------------\r\n",
                             heap_info.total_free_bytes, free_psram, 
-                            (unsigned int)esp_clk_get_cpu_freq_mhz(), esp_get_idf_version());
+                            (unsigned long)esp_rom_get_cpu_ticks_per_us(), esp_get_idf_version());
                         uart_write_bytes(UART_PORT, info, strlen(info));
                     } else if (cmd == 'r') {
                         uart_write_bytes(UART_PORT, "\r\nRestarting...\r\n", 17);

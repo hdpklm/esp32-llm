@@ -1069,9 +1069,10 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
         char *piece = decode(tokenizer, token, next);
         if (on_token != NULL) {
             on_token(piece);
+        } else {
+            safe_printf(piece); // same as printf("%s", piece), but skips "unsafe" bytes
+            fflush(stdout);
         }
-        safe_printf(piece); // same as printf("%s", piece), but skips "unsafe" bytes
-        fflush(stdout);
         token = next;
 
         // init the timer here because the first iteration can be slower
@@ -1088,7 +1089,9 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
         long end = time_in_ms();
         float tks = (pos - 1) / (double)(end - start) * 1000;
         fprintf(stderr, "achieved tok/s: %f\n", tks);
-        cb_done(tks);
+        if (cb_done != NULL) {
+            cb_done(tks);
+        }
     }
 
     free(prompt_tokens);

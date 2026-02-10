@@ -1049,8 +1049,9 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
     int next;                     // will store the next token in the sequence
     int token = prompt_tokens[0]; // kick off with the first token in the prompt
     int pos = 0;                  // position in the sequence
-    if (steps == 0 || steps > transformer->config.seq_len) steps = transformer->config.seq_len;
-    while (pos < steps)
+    int total_steps = num_prompt_tokens + steps;
+    if (steps == 0 || total_steps > transformer->config.seq_len) total_steps = transformer->config.seq_len;
+    while (pos < total_steps)
     {
         // forward the transformer to get logits for the next token
         v4sf *logits = forward(transformer, token, pos);

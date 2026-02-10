@@ -62,5 +62,13 @@
     - Se corrigió `read_checkpoint` para saltar exactamente `sizeof(Config)` bytes antes de leer los pesos en el buffer alineado.
     - Se simplificó la lógica de lectura asegurando que el buffer de datos solo contenga los pesos y esté alineado a 16.
 
+## 📝 Registro: v1.8 - Reajuste de Lógica de Longitud (Steps)
+- **Fallo/Motivo**: El usuario observó que al configurar `/l 15`, la generación se cortaba prematuramente si el prompt era largo, ya que los "steps" se contaban como (entrada + salida).
+- **Causa**: La lógica del loop principal en `generate` usaba los "steps" como el límite absoluto de la posición (`pos`), incluyendo los tokens del prompt.
+- **Solución/Cambio**:
+    - Se modificó `llm.c` para que `steps` represente exclusivamente la cantidad de tokens a **generar**.
+    - El nuevo límite del loop es `total_steps = num_prompt_tokens + steps`.
+    - Se mantiene la protección para que `total_steps` nunca exceda el `seq_len` (ventana de contexto) del modelo.
+
 # Backup
 (Espacio para ideas descartadas)

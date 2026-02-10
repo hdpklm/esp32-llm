@@ -334,7 +334,7 @@ void uart_llm_task_2(void *arg) {
                         print_help();
                     } else if (cmd == 's') {
                         char status[192];
-                        snprintf(status, sizeof(status), "\r\n--- Status ---\r\nTemp: %.2f\r\nSteps: %d (Max: %d)\r\nTopp: %.2f\r\nVocab: %d\r\n--------------\r\n", 
+                        snprintf(status, sizeof(status), "\r\n--- Status ---\r\nTemp: %.2f\r\nGen Length: %d (Context Max: %d)\r\nTopp: %.2f\r\nVocab: %d\r\n--------------\r\n", 
                                  sampler.temperature, llm_steps, transformer.config.seq_len, sampler.topp, transformer.config.vocab_size);
                         uart_write_bytes(UART_PORT, status, strlen(status));
                     } else if (cmd == 't') {

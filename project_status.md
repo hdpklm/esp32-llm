@@ -11,7 +11,9 @@ Este proyecto implementa la inferencia de un modelo de lenguaje pequeño (LLM) e
 ## Estado Actual
 - Implementada la generación con callback para integración con UART.
 - Sistema de exclusión mutua (mutex) para evitar conflictos de generación concurrentes.
+- **Interactividad**: Añadido eco de caracteres y soporte para retroceso (Backspace) en el terminal.
 
 ## Pendientes / Problemas Detectados
 - ~~Tokens duplicados en la salida UART.~~ (Corregido)
 - ~~Crash (Guru Meditation Error) al terminar la generación por dereferencia de puntero NULL.~~ (Corregido)
+- ~~Falta de feedback visual al escribir (Echo) y corregir (Backspace).~~ (Corregido)

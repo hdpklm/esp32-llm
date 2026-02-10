@@ -310,8 +310,18 @@ void uart_llm_task_2(void *arg) {
 
         // ESP_LOGI(TAG, "Received char: %c (%d)", c, c); // Verbose debug
 
+        if (c == 0x08 || c == 0x7F) { // Backspace or Delete
+            if (idx > 0) {
+                idx--;
+                const char backspace_seq[] = "\b \b";
+                uart_write_bytes(UART_PORT, backspace_seq, 3);
+            }
+            continue;
+        }
+
         if (c == '\n' || c == '\r') {
             line[idx] = '\0';
+            uart_write_bytes(UART_PORT, "\r\n", 2); // Echo newline properly
             
             if (strlen(line) == 0) {
                  idx = 0;
@@ -321,9 +331,9 @@ void uart_llm_task_2(void *arg) {
             ESP_LOGI(TAG, "Processing prompt: '%s'", line);
             if (xSemaphoreTake(llm_mutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
                 ESP_LOGI(TAG, "Mutex taken, starting generation");
-                uart_write_bytes(UART_PORT, "\n", 1); 
+                // uart_write_bytes(UART_PORT, "\n", 1); 
                 generate_with_callback(&transformer, &tokenizer, &sampler, line, llm_response_callback);
-                ESP_LOGI(TAG, "Generation finished");
+                ESP_LOGI(TAG, "Generation finished\r\n> ");
                 xSemaphoreGive(llm_mutex);
             } else {
                 ESP_LOGE(TAG, "Failed to take mutex, LLM busy");
@@ -334,6 +344,7 @@ void uart_llm_task_2(void *arg) {
         } else {
             if (idx < UART_BUF_SIZE - 1) {
                 line[idx++] = c;
+                uart_write_bytes(UART_PORT, (char*)&c, 1); // Echo the character
             } else {
                 ESP_LOGW(TAG, "UART buffer full, discarding char");
             }

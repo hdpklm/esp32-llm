@@ -293,10 +293,10 @@ void softmax(v4sf *x, int size)
 
 void matmul_task(void *params)
 {
-    const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
+    // const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
     MatMulTaskParams *p = (MatMulTaskParams *)params;
     TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-    char *tName = pcTaskGetName(current_task);
+    // char *tName = pcTaskGetName(current_task);
     // ESP_LOGI(TAG, "Created Task %s", tName);
     for (;;)
     {
@@ -319,10 +319,10 @@ void matmul_task(void *params)
 
 void forward_task(void *params)
 {
-    const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
+    // const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
     ForwardTaskParams *t_params = (ForwardTaskParams *)params;
     TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-    char *tName = pcTaskGetName(current_task);
+    // char *tName = pcTaskGetName(current_task);
     // ESP_LOGI(TAG, "Created Task %s", tName);
     for (;;)
     {
@@ -1018,7 +1018,7 @@ long time_in_ms()
 // ----------------------------------------------------------------------------
 // generation loop
 
-void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps, generated_complete_cb cb_done)
+void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps, generated_complete_cb cb_done, void (*on_token)(const char *))
 {
     char *empty_prompt = "";
     if (prompt == NULL)
@@ -1067,6 +1067,9 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
 
         // print the token as string, decode it with the Tokenizer object
         char *piece = decode(tokenizer, token, next);
+        if (on_token != NULL) {
+            on_token(piece);
+        }
         safe_printf(piece); // same as printf("%s", piece), but skips "unsafe" bytes
         fflush(stdout);
         token = next;

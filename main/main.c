@@ -47,7 +47,7 @@ typedef struct {
 #include <string.h>
 
 #define UART_BUF_SIZE 2048
-#define UART_PORT UART_NUM_1
+#define UART_PORT UART_NUM_0
 #define UART_BAUD 115200
 
 extern Transformer transformer;
@@ -207,23 +207,7 @@ void app_main(void) {
 
     // run!
     draw_llama();
-    generate(&transformer, &tokenizer, &sampler, prompt, steps, &generate_complete_cb);
-
-	// chatgpt v1
-	// uart_llm_args_t args_struct = {
-	//     .transformer = &transformer,
-	//     .tokenizer   = &tokenizer,
-	//     .sampler     = &sampler
-	// };
-	// uart_init_custom();
-	// xTaskCreate(uart_llm_task, "uart_llm", 8192, &args_struct, 5, NULL);
-
-	// chatgpt v2
-    // Inicializa LLM...
-    init_storage();
-    build_transformer(&transformer, "/data/stories260K.bin");
-    build_tokenizer(&tokenizer, "/data/tok512.bin", transformer.config.vocab_size);
-    build_sampler(&sampler, transformer.config.vocab_size, 1.0f, 0.9f, time(NULL));
+    generate(&transformer, &tokenizer, &sampler, prompt, steps, &generate_complete_cb, NULL);
 
     // Inicia la tarea UART
     start_uart_llm_task();
@@ -285,7 +269,7 @@ void uart_llm_loop(Transformer *transformer, Tokenizer *tokenizer, Sampler *samp
 int generate_with_output(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
                          char *prompt, char *out_buf, size_t out_buf_len) {
     // Llamar a generate directamente, que imprime por UART
-    generate(transformer, tokenizer, sampler, prompt, 256, NULL);
+    generate(transformer, tokenizer, sampler, prompt, 256, NULL, NULL);
 
     // Para compilar, devuelvo un texto placeholder
     snprintf(out_buf, out_buf_len, "[LLM output]");
@@ -311,7 +295,6 @@ int generate_with_output(Transformer *transformer, Tokenizer *tokenizer, Sampler
 // Función de callback normal (no lambda)
 void llm_response_callback(const char *resp) {
     uart_write_bytes(UART_PORT, resp, strlen(resp));
-    uart_write_bytes(UART_PORT, "\r\n", 2);
 }
 
 SemaphoreHandle_t llm_mutex;
@@ -325,22 +308,34 @@ void uart_llm_task_2(void *arg) {
         int read = uart_read_bytes(UART_PORT, &c, 1, portMAX_DELAY);
         if (read <= 0) continue;
 
+        // ESP_LOGI(TAG, "Received char: %c (%d)", c, c); // Verbose debug
+
         if (c == '\n' || c == '\r') {
             line[idx] = '\0';
-            idx = 0;
+            
+            if (strlen(line) == 0) {
+                 idx = 0;
+                 continue;
+            }
 
-            if (strlen(line) == 0) continue;
-
+            ESP_LOGI(TAG, "Processing prompt: '%s'", line);
             if (xSemaphoreTake(llm_mutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
+                ESP_LOGI(TAG, "Mutex taken, starting generation");
+                uart_write_bytes(UART_PORT, "\n", 1); 
                 generate_with_callback(&transformer, &tokenizer, &sampler, line, llm_response_callback);
+                ESP_LOGI(TAG, "Generation finished");
                 xSemaphoreGive(llm_mutex);
             } else {
+                ESP_LOGE(TAG, "Failed to take mutex, LLM busy");
                 const char *msg = "LLM busy\r\n";
                 uart_write_bytes(UART_PORT, msg, strlen(msg));
             }
+            idx = 0; // Reset buffer AFTER processing
         } else {
             if (idx < UART_BUF_SIZE - 1) {
                 line[idx++] = c;
+            } else {
+                ESP_LOGW(TAG, "UART buffer full, discarding char");
             }
         }
     }
@@ -364,7 +359,6 @@ void start_uart_llm_task() {
 
 int generate_with_callback(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
                            const char *input, void (*callback)(const char *)) {
-    // por ahora solo llamamos al callback con una respuesta de prueba
-    if(callback) callback("respuesta de prueba");
+    generate(transformer, tokenizer, sampler, (char *)input, 256, NULL, callback);
     return 0;
 }

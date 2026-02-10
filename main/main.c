@@ -9,7 +9,9 @@
 #include <time.h>
 #include "llm.h"
 #include <string.h>
-#include "llama.h"
+#include "esp_system.h"
+#include "esp_heap_caps.h"
+#include "esp_clk.h"
 
 
 #ifdef DISPLAY_OLED
@@ -325,7 +327,7 @@ void uart_llm_task_2(void *arg) {
                 if (cmd == '/') {
                     // Escape: // at start becomes /
                     p_line = line + 1;
-                } else if (cmd == 'h' || cmd == 's' || cmd == 't' || cmd == 'l') {
+                } else if (cmd == 'h' || cmd == 's' || cmd == 't' || cmd == 'l' || cmd == 'p' || cmd == 'i' || cmd == 'r') {
                     is_command = true;
                     char *args = &line[2];
                     while(*args == ' ') args++; // Skip spaces
@@ -354,6 +356,33 @@ void uart_llm_task_2(void *arg) {
                             snprintf(msg, sizeof(msg), "\r\nLength set to %d (Capped at Max)\r\n", llm_steps);
                             uart_write_bytes(UART_PORT, msg, strlen(msg));
                         }
+                    } else if (cmd == 'p') {
+                        float new_topp = atof(args);
+                        if (new_topp >= 0.0f && new_topp <= 1.0f) {
+                            sampler.topp = new_topp;
+                            char msg[64];
+                            snprintf(msg, sizeof(msg), "\r\nTop-p set to %.2f\r\n", sampler.topp);
+                            uart_write_bytes(UART_PORT, msg, strlen(msg));
+                        }
+                    } else if (cmd == 'i') {
+                        char info[256];
+                        multi_heap_info_t heap_info;
+                        heap_caps_get_info(&heap_info, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                        size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+                        snprintf(info, sizeof(info), 
+                            "\r\n--- System Info ---\r\n"
+                            "Free Internal RAM: %zu bytes\r\n"
+                            "Free PSRAM       : %zu bytes\r\n"
+                            "CPU Freq         : %u MHz\r\n"
+                            "IDF Version      : %s\r\n"
+                            "-------------------\r\n",
+                            heap_info.total_free_bytes, free_psram, 
+                            (unsigned int)esp_clk_get_cpu_freq_mhz(), esp_get_idf_version());
+                        uart_write_bytes(UART_PORT, info, strlen(info));
+                    } else if (cmd == 'r') {
+                        uart_write_bytes(UART_PORT, "\r\nRestarting...\r\n", 17);
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                        esp_restart();
                     }
                 }
                 // If it starts with / but is not one of our commands or //, 
@@ -415,9 +444,11 @@ void print_help() {
         "/h          : Show this help message\r\n"
         "/s          : Show current status/config\r\n"
         "/t <float>  : Set temperature (e.g., /t 0.7)\r\n"
-        "/l <int>    : Set generation length (e.g., /l 128)\r\n"
+        "/p <float>  : Set Top-p sampling (e.g., /p 0.9)\r\n"
+        "/l <int>    : Set generation length\r\n"
+        "/i          : Show system/hardware info\r\n"
+        "/r          : Restart device\r\n"
         "Escaping: Use // to send a prompt starting with /\r\n"
-        "/ followed by space, number or symbol is treated as prompt.\r\n"
         "----------------------\r\n"
         "> ";
     uart_write_bytes(UART_PORT, help, strlen(help));

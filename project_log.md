@@ -70,5 +70,14 @@
     - El nuevo límite del loop es `total_steps = num_prompt_tokens + steps`.
     - Se mantiene la protección para que `total_steps` nunca exceda el `seq_len` (ventana de contexto) del modelo.
 
+## 📝 Registro: v1.9 - Ampliación de Comandos UART
+- **Fallo/Motivo**: El usuario necesitaba más control sobre los parámetros del Sampler y acceso a información del sistema.
+- **Causa**: Solo estaban implementados `/t` y `/l`. Faltaban comandos para Top-p y utilidades de sistema.
+- **Solución/Cambio**:
+    - Se añadió el comando `/p <float>` para modificar el parámetro `Top-p` del Sampler en tiempo real.
+    - Se añadió el comando `/i` (System Info) que muestra memoria RAM libre (interna y PSRAM), frecuencia de CPU y versión de IDF.
+    - Se añadió el comando `/r` para realizar un reinicio por software (`esp_restart`).
+    - Se actualizó el mensaje de ayuda (`/h`) y la visualización de estado (`/s`) para reflejar los nuevos parámetros.
+
 # Backup
 (Espacio para ideas descartadas)

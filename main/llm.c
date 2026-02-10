@@ -18,6 +18,7 @@
 #include "esp_system.h"
 #include "esp_dsp.h"
 #include "esp_attr.h"
+#include "esp_heap_caps.h"
 
 #define MAP_FAILED NULL
 #define munmap(ptr, length) custom_munmap(ptr)
@@ -89,22 +90,26 @@ int custom_close(int fd)
 
 void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
           char *cli_user_prompt, char *cli_system_prompt, int steps);
+void* malloc_aligned(size_t size) {
+    void* ptr = heap_caps_aligned_alloc(16, size, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+    if (ptr) memset(ptr, 0, size);
+    return ptr;
+}
 
 void malloc_run_state(RunState *s, Config *p)
 {
-    // we calloc instead of malloc to keep valgrind happy
     int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
-    s->x = calloc(p->dim, sizeof(v4sf));
-    s->xb = calloc(p->dim, sizeof(v4sf));
-    s->xb2 = calloc(p->dim, sizeof(v4sf));
-    s->hb = calloc(p->hidden_dim, sizeof(v4sf));
-    s->hb2 = calloc(p->hidden_dim, sizeof(v4sf));
-    s->q = calloc(p->dim, sizeof(v4sf));
-    s->key_cache = calloc(p->n_layers * p->seq_len * kv_dim, sizeof(v4sf));
-    s->value_cache = calloc(p->n_layers * p->seq_len * kv_dim, sizeof(v4sf));
-    s->att = calloc(p->n_heads * p->seq_len, sizeof(v4sf));
-    s->logits = calloc(p->vocab_size, sizeof(v4sf));
-    // ensure all mallocs went fine
+    s->x = malloc_aligned(p->dim * sizeof(v4sf));
+    s->xb = malloc_aligned(p->dim * sizeof(v4sf));
+    s->xb2 = malloc_aligned(p->dim * sizeof(v4sf));
+    s->hb = malloc_aligned(p->hidden_dim * sizeof(v4sf));
+    s->hb2 = malloc_aligned(p->hidden_dim * sizeof(v4sf));
+    s->q = malloc_aligned(p->dim * sizeof(v4sf));
+    s->key_cache = malloc_aligned(p->n_layers * p->seq_len * kv_dim * sizeof(v4sf));
+    s->value_cache = malloc_aligned(p->n_layers * p->seq_len * kv_dim * sizeof(v4sf));
+    s->att = malloc_aligned(p->n_heads * p->seq_len * sizeof(v4sf));
+    s->logits = malloc_aligned(p->vocab_size * sizeof(v4sf));
+    
     if (!s->x || !s->xb || !s->xb2 || !s->hb || !s->hb2 || !s->q || !s->key_cache || !s->value_cache || !s->att || !s->logits)
     {
         fprintf(stderr, "malloc failed!\n");
@@ -175,32 +180,35 @@ void read_checkpoint(char *checkpoint, Config *config, TransformerWeights *weigh
     // negative vocab size is hacky way of signaling unshared weights. bit yikes.
     int shared_weights = config->vocab_size > 0 ? 1 : 0;
     config->vocab_size = abs(config->vocab_size);
-    ESP_LOGI(TAG, "Vocab size if %d", config->vocab_size);
+    ESP_LOGI(TAG, "Vocab size: %d", config->vocab_size);
     // figure out the file size
     fseek(file, 0, SEEK_END); // move file pointer to end of file
     *file_size = ftell(file); // get the file size, in bytes
-    fseek(file, 0, SEEK_SET); // move back to beginning for reading
+    fseek(file, sizeof(Config), SEEK_SET); // Move back to start of weights
+    
     ESP_LOGI(TAG, "File size: %zu bytes", *file_size);
     ESP_LOGI(TAG, "Free ram available: %lu", esp_get_free_heap_size());
-    *data = malloc(*file_size);
+    
+    // Allocate aligned memory for the weights (excluding Config)
+    size_t weights_size = *file_size - sizeof(Config);
+    *data = (v4sf*)heap_caps_aligned_alloc(16, weights_size, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
     if (*data == NULL)
     {
-        ESP_LOGE(TAG, "Malloc operation failed");
+        ESP_LOGE(TAG, "Aligned malloc failed for weights");
         exit(EXIT_FAILURE);
     }
-    // Read the entire file into memory
-    size_t bytes_read = fread(*data, 1, *file_size, file);
-    if (bytes_read != *file_size)
+    // Read the weights into memory
+    size_t bytes_read = fread(*data, 1, weights_size, file);
+    if (bytes_read != weights_size)
     {
-        ESP_LOGE(TAG, "Failed to read file into memory");
-        ESP_LOGE(TAG, "Bytes read %zu bytes", bytes_read);
+        ESP_LOGE(TAG, "Failed to read weights: expected %zu, read %zu", weights_size, bytes_read);
         exit(EXIT_FAILURE);
     }
     fclose(file);
 
-    ESP_LOGI(TAG, "Successfully read LLM into memory");
+    ESP_LOGI(TAG, "Successfully read LLM weights into memory");
     ESP_LOGI(TAG, "Free ram available: %lu", esp_get_free_heap_size());
-    v4sf *weights_ptr = *data + sizeof(Config) / sizeof(v4sf);
+    v4sf *weights_ptr = *data;
     memory_map_weights(weights, config, weights_ptr, shared_weights);
     ESP_LOGI(TAG, "Successfully read checkpoint");
 }
@@ -225,8 +233,8 @@ void build_transformer(Transformer *t, char *checkpoint_path)
 
     matmul_params = malloc(sizeof(MatMulTaskParams));
     forward_params = malloc(sizeof(ForwardTaskParams));
-    xTaskCreatePinnedToCore(matmul_task, "MatMul2", 2048, matmul_params, 19, &matmul_task_2, 1);             // Run on Core 1
-    xTaskCreatePinnedToCore(forward_task, "ForwardTask", 2048, forward_params, 19, &handle_forward_task, 1); // Run on Core 1
+    xTaskCreatePinnedToCore(matmul_task, "MatMul2", 4096, matmul_params, 19, &matmul_task_2, 1);             // Run on Core 1
+    xTaskCreatePinnedToCore(forward_task, "ForwardTask", 4096, forward_params, 19, &handle_forward_task, 1); // Run on Core 1
     ESP_LOGI(TAG, "Created FreeRTOS Tasks");
 }
 
@@ -940,7 +948,7 @@ int sample_topp(v4sf *probabilities, int n, v4sf topp, ProbIndex *probindex, v4s
     return probindex[last_idx].index; // in case of rounding errors
 }
 
-void build_sampler(Sampler *sampler, int vocab_size, v4sf temperature, v4sf topp, unsigned long long rng_seed)
+void build_sampler(Sampler *sampler, int vocab_size, float temperature, float topp, unsigned long long rng_seed)
 {
     sampler->vocab_size = vocab_size;
     sampler->temperature = temperature;
@@ -1041,6 +1049,7 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
     int next;                     // will store the next token in the sequence
     int token = prompt_tokens[0]; // kick off with the first token in the prompt
     int pos = 0;                  // position in the sequence
+    if (steps == 0 || steps > transformer->config.seq_len) steps = transformer->config.seq_len;
     while (pos < steps)
     {
         // forward the transformer to get logits for the next token

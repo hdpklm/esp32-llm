@@ -12,8 +12,10 @@ Este proyecto implementa la inferencia de un modelo de lenguaje pequeño (LLM) e
 - Implementada la generación con callback para integración con UART.
 - Sistema de exclusión mutua (mutex) para evitar conflictos de generación concurrentes.
 - **Interactividad**: Añadido eco de caracteres y soporte para retroceso (Backspace) en el terminal.
+- **Sistema de Comandos**: Implementado sistema de comandos via `/` (anclado estrictamente al inicio de la línea) para ayuda, estado y configuración dinámica.
 
 ## Pendientes / Problemas Detectados
 - ~~Tokens duplicados en la salida UART.~~ (Corregido)
 - ~~Crash (Guru Meditation Error) al terminar la generación por dereferencia de puntero NULL.~~ (Corregido)
 - ~~Falta de feedback visual al escribir (Echo) y corregir (Backspace).~~ (Corregido)
+- ~~Internal Compiler Error (ICE) en `esp-dsp` durante la fase `ira`.~~ (Workaround aplicado)

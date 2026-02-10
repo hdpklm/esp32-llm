@@ -59,9 +59,9 @@ Tokenizer tokenizer;
 Sampler sampler;
 extern int generate_with_callback(Transformer *, Tokenizer *, Sampler *, const char *, void (*)(const char*));
 
-SemaphoreHandle_t llm_mutex;
-static void uart_llm_task_2(void *arg);
 void start_uart_llm_task();
+void print_help();
+int llm_steps = 256;
 // end v2
 
 
@@ -159,6 +159,7 @@ void generate_complete_cb(float tk_s) {
     char buffer[50];
     sprintf(buffer, "%.2f tok/s", tk_s);
     write_display(buffer);
+    printf("achieved tok/s: %s\n", buffer);
 }
 
 /**
@@ -182,7 +183,6 @@ void app_main(void) {
     char *tokenizer_path = "/data/tok512.bin";
     float temperature = 1.0f;        // 0.0 = greedy deterministic. 1.0 = original. don't set higher
     float topp = 0.9f;               // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
-    int steps = 256;                 // number of steps to run for
     char *prompt = NULL;             // prompt string
     unsigned long long rng_seed = 0; // seed rng with time by default
 
@@ -194,8 +194,6 @@ void app_main(void) {
     // Transformer transformer;
     ESP_LOGI(TAG, "LLM Path is %s", checkpoint_path);
     build_transformer(&transformer, checkpoint_path);
-    if (steps == 0 || steps > transformer.config.seq_len)
-        steps = transformer.config.seq_len; // override to ~max length
 
     // build the Tokenizer via the tokenizer .bin file
     // Tokenizer tokenizer;
@@ -207,7 +205,9 @@ void app_main(void) {
 
     // run!
     draw_llama();
-    generate(&transformer, &tokenizer, &sampler, prompt, steps, &generate_complete_cb, NULL);
+    generate(&transformer, &tokenizer, &sampler, prompt, llm_steps, &generate_complete_cb, NULL);
+
+    print_help();
 
     // Inicia la tarea UART
     start_uart_llm_task();
@@ -278,19 +278,6 @@ int generate_with_output(Transformer *transformer, Tokenizer *tokenizer, Sampler
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 // chatgpt v2
 // Función de callback normal (no lambda)
 void llm_response_callback(const char *resp) {
@@ -321,26 +308,74 @@ void uart_llm_task_2(void *arg) {
 
         if (c == '\n' || c == '\r') {
             line[idx] = '\0';
-            uart_write_bytes(UART_PORT, "\r\n", 2); // Echo newline properly
+            uart_write_bytes(UART_PORT, "\r\n", 2); 
             
             if (strlen(line) == 0) {
                  idx = 0;
+                 uart_write_bytes(UART_PORT, "> ", 2);
                  continue;
             }
 
-            ESP_LOGI(TAG, "Processing prompt: '%s'", line);
-            if (xSemaphoreTake(llm_mutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
-                ESP_LOGI(TAG, "Mutex taken, starting generation");
-                // uart_write_bytes(UART_PORT, "\n", 1); 
-                generate_with_callback(&transformer, &tokenizer, &sampler, line, llm_response_callback);
-                ESP_LOGI(TAG, "Generation finished\r\n> ");
-                xSemaphoreGive(llm_mutex);
-            } else {
-                ESP_LOGE(TAG, "Failed to take mutex, LLM busy");
-                const char *msg = "LLM busy\r\n";
-                uart_write_bytes(UART_PORT, msg, strlen(msg));
+            // Command parsing
+            bool is_command = false;
+            char *p_line = line;
+            
+            if (line[0] == '/') {
+                char cmd = line[1];
+                if (cmd == '/') {
+                    // Escape: // at start becomes /
+                    p_line = line + 1;
+                } else if (cmd == 'h' || cmd == 's' || cmd == 't' || cmd == 'l') {
+                    is_command = true;
+                    char *args = &line[2];
+                    while(*args == ' ') args++; // Skip spaces
+
+                    if (cmd == 'h') {
+                        print_help();
+                    } else if (cmd == 's') {
+                        char status[192];
+                        snprintf(status, sizeof(status), "\r\n--- Status ---\r\nTemp: %.2f\r\nSteps: %d (Max: %d)\r\nTopp: %.2f\r\nVocab: %d\r\n--------------\r\n", 
+                                 sampler.temperature, llm_steps, transformer.config.seq_len, sampler.topp, transformer.config.vocab_size);
+                        uart_write_bytes(UART_PORT, status, strlen(status));
+                    } else if (cmd == 't') {
+                        float new_temp = atof(args);
+                        sampler.temperature = new_temp;
+                        char msg[64];
+                        snprintf(msg, sizeof(msg), "\r\nTemperature set to %.2f\r\n", sampler.temperature);
+                        uart_write_bytes(UART_PORT, msg, strlen(msg));
+                    } else if (cmd == 'l') {
+                        int new_steps = atoi(args);
+                        if (new_steps > 0) {
+                            if (new_steps > transformer.config.seq_len) {
+                                new_steps = transformer.config.seq_len;
+                            }
+                            llm_steps = new_steps;
+                            char msg[64];
+                            snprintf(msg, sizeof(msg), "\r\nLength set to %d (Capped at Max)\r\n", llm_steps);
+                            uart_write_bytes(UART_PORT, msg, strlen(msg));
+                        }
+                    }
+                }
+                // If it starts with / but is not one of our commands or //, 
+                // it just stays in p_line as a prompt starting with /
             }
-            idx = 0; // Reset buffer AFTER processing
+
+            if (!is_command) {
+                ESP_LOGI(TAG, "Processing prompt: '%s'", p_line);
+                if (xSemaphoreTake(llm_mutex, pdMS_TO_TICKS(5000)) == pdTRUE) {
+                    ESP_LOGI(TAG, "Mutex taken, starting generation");
+                    generate_with_callback(&transformer, &tokenizer, &sampler, p_line, llm_response_callback);
+                    ESP_LOGI(TAG, "Generation finished\r\n> ");
+                    xSemaphoreGive(llm_mutex);
+                } else {
+                    ESP_LOGE(TAG, "Failed to take mutex, LLM busy");
+                    const char *msg = "LLM busy\r\n";
+                    uart_write_bytes(UART_PORT, msg, strlen(msg));
+                }
+            } else {
+                uart_write_bytes(UART_PORT, "> ", 2);
+            }
+            idx = 0; 
         } else {
             if (idx < UART_BUF_SIZE - 1) {
                 line[idx++] = c;
@@ -370,6 +405,20 @@ void start_uart_llm_task() {
 
 int generate_with_callback(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
                            const char *input, void (*callback)(const char *)) {
-    generate(transformer, tokenizer, sampler, (char *)input, 256, NULL, callback);
+    generate(transformer, tokenizer, sampler, (char *)input, llm_steps, NULL, callback);
     return 0;
+}
+
+void print_help() {
+    const char *help = 
+        "\r\n--- ESP32 LLM Help ---\r\n"
+        "/h          : Show this help message\r\n"
+        "/s          : Show current status/config\r\n"
+        "/t <float>  : Set temperature (e.g., /t 0.7)\r\n"
+        "/l <int>    : Set generation length (e.g., /l 128)\r\n"
+        "Escaping: Use // to send a prompt starting with /\r\n"
+        "/ followed by space, number or symbol is treated as prompt.\r\n"
+        "----------------------\r\n"
+        "> ";
+    uart_write_bytes(UART_PORT, help, strlen(help));
 }

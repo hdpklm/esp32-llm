@@ -3,8 +3,14 @@ idf_component_register(SRCS "main.c" "llm.c"
 
 
 
+# Workaround for Internal Compiler Error in GCC during esp-dsp compilation
 # https://github.com/espressif/esp-idf/issues/11696#issuecomment-1596208414
-target_compile_options(${COMPONENT_LIB} PRIVATE -fno-if-conversion) # 
+target_compile_options(${COMPONENT_LIB} PRIVATE -fno-if-conversion)
+
+idf_component_get_property(esp_dsp_lib espressif__esp-dsp COMPONENT_LIB)
+if(esp_dsp_lib)
+    target_compile_options(${esp_dsp_lib} PRIVATE -fno-if-conversion -fno-ira-share-save-slots -fno-ira-share-spill-slots)
+endif()
 
 
 # Create a SPIFFS image from the contents of the 'spiffs_image' directory
